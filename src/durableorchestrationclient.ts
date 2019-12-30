@@ -470,6 +470,22 @@ export class DurableOrchestrationClient {
     /**
      * Signals an entity to perform an operation.
      * @param entityId The target entity.
+     * @param entityObject An instance of the entity.
+     * @param action The operation to be performed on the entity.
+     * @param taskHubName The TaskHubName of the target entity.
+     * @param connectionName The name of the connection string associated with [taskHubName].
+     */
+    public async signalEntity<T>(
+        entityId: EntityId,
+        entityObject: T,
+        action: (entityObject: T) => unknown,
+        taskHubName?: string,
+        connectionName?: string,
+        ): Promise<void>;
+
+    /**
+     * Signals an entity to perform an operation.
+     * @param entityId The target entity.
      * @param operationName The name of the operation.
      * @param operationContent The content for the operation.
      * @param taskHubName The TaskHubName of the target entity.
@@ -481,9 +497,30 @@ export class DurableOrchestrationClient {
         operationContent?: unknown,
         taskHubName?: string,
         connectionName?: string,
+        ): Promise<void>;
+
+    public async signalEntity<T>(
+        entityId: EntityId,
+        arg2?: string | T,
+        arg3?: ((entityObject: T) => unknown) | unknown,
+        taskHubName?: string,
+        connectionName?: string,
         ): Promise<void> {
         if (!(this.clientData.baseUrl && this.clientData.requiredQueryStringParameters)) {
             throw new Error("Cannot use the signalEntity API with this version of the Durable Task Extension.");
+        }
+
+        let operationName: string | undefined;
+        let operationContent: unknown | undefined;
+        if (!arg2 || typeof(arg2) === "string") {
+            operationName = arg2 as string;
+            operationContent = arg3;
+        } else {
+            const proxy = createEntityProxy<T>(arg2);
+            const action: any = arg3;
+            const signalParameters = action(proxy);
+            operationName = signalParameters.operationName;
+            operationContent = signalParameters.operationContent;
         }
 
         const requestUrl = WebhookUtils.getSignalEntityUrl(this.clientData.baseUrl,
@@ -504,6 +541,27 @@ export class DurableOrchestrationClient {
             }
         } catch (error) {   // error object is axios-specific, not a JavaScript Error; extract relevant bit
             throw error.message;
+        }
+
+        function createEntityProxy<U>(entityObject: any): U {
+            let obj = entityObject;
+            const props = [];
+            do {
+                props.push(...Object.getOwnPropertyNames(obj));
+                obj = Object.getPrototypeOf(obj);
+            } while (obj);
+
+            props.forEach((p) => {
+                if (typeof(entityObject[p]) === "function") {
+                    entityObject[p] = (...args: any[]) => {
+                        return {
+                            operationName: p,
+                            operationContent: args,
+                        };
+                    };
+                }
+            });
+            return entityObject;
         }
     }
 

@@ -90,7 +90,26 @@ export class DurableEntityContext {
      * @param operationName The name of the operation.
      * @param operationInput The operation input.
      */
-    public signalEntity(entity: EntityId, operationName: string, operationInput?: unknown): void {
+    public signalEntity(entity: EntityId, operationName: string, operationInput?: unknown): void;
+
+    /**
+     * Signals an entity to perform an operation, without waiting for a
+     * response. Any result or exception is ignored (fire and forget).
+     *
+     * @param entity The target entity.
+     * @param entityClass The class that implements the entity.
+     * @param action The action performed on an entity.
+     */
+    public signalEntity<T>(entity: EntityId, entityObject: T, action: (entityObject: T) => unknown): void;
+
+    public signalEntity<T>(entity: EntityId, arg2: any, arg3?: any): void {
         throw new Error("This is a placeholder.");
+    }
+
+    /**
+     *
+     */
+    public async dispatch<T>(entityFactory: () => T): Promise<void> {
+        throw new Error("This is a placeholder");
     }
 }

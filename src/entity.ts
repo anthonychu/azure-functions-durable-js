@@ -58,6 +58,7 @@ export class Entity {
             return: this.return.bind(this, batchState, startTime),
             destructOnExit: this.destructOnExit.bind(this, batchState),
             signalEntity: this.signalEntity.bind(this, batchState),
+            dispatch: this.dispatch.bind(this, currentRequest, batchState, startTime),
         };
     }
 
@@ -92,12 +93,74 @@ export class Entity {
         returnState.entityState = JSON.stringify(state);
     }
 
-    private signalEntity(returnState: EntityState, entity: EntityId, operationName: string, operationInput?: unknown): void {
-        returnState.signals.push(new Signal(entity, operationName, operationInput ? JSON.stringify(operationInput) : ""));
+    // private signalEntity(returnState: EntityState, entity: EntityId, operationName: string, operationInput?: unknown): void {
+    //     returnState.signals.push(new Signal(entity, operationName, operationInput ? JSON.stringify(operationInput) : ""));
+    // }
+    private signalEntity<T>(returnState: EntityState, entityId: EntityId, arg2: string | T, arg3?: any): void {
+        let operationName: string;
+        let operationInput: string;
+        if (typeof(arg2) === "string") {
+            operationName = arg2;
+            operationInput = arg3 ? JSON.stringify(arg3) : "";
+        } else {
+            const entityObject = arg2;
+            const action: (entityObject: T) => unknown = arg3;
+            const proxy = createEntityProxy<T>(entityObject);
+            const signalParameters: any = action(proxy);
+            operationName = signalParameters.operationName;
+            operationInput = signalParameters.operationContent;
+        }
+        returnState.signals.push(new Signal(entityId, operationName, operationInput ? JSON.stringify(operationInput) : ""));
+
+        function createEntityProxy<U>(entityObject: any): U {
+            let obj = entityObject;
+            const props = [];
+            do {
+                props.push(...Object.getOwnPropertyNames(obj));
+                obj = Object.getPrototypeOf(obj);
+            } while (obj);
+
+            props.forEach((p) => {
+                if (typeof(entityObject[p]) === "function") {
+                    entityObject[p] = (...args: any[]) => {
+                        return {
+                            operationName: p,
+                            operationContent: args,
+                        };
+                    };
+                }
+            });
+            return entityObject;
+        }
     }
 
     private computeElapsedMilliseconds(startTime: Date): number {
         const endTime = new Date();
         return endTime.getTime() - startTime.getTime();
+    }
+
+    private async dispatch<T>(currentRequest: RequestMessage, returnState: EntityState, startTime: Date, entityFactory: () => T) {
+        const operationName = currentRequest.name;
+        if (!operationName) {
+            throw new Error("Undefined operation");
+        }
+
+        const state = this.getState(returnState, () => ({}));
+        const entity: any = Object.assign(entityFactory(), state);
+
+        if (typeof(entity[operationName]) !== "function") {
+            throw new Error(`Method "${operationName}" does not exist in entity`);
+        }
+
+        const input: any[] = this.getInput(currentRequest) as any[];
+        let result: any = entity[operationName](...input);
+
+        const isPromise = result && typeof(result.then) === "function";
+        if (isPromise) {
+            result = await result;
+        }
+
+        this.setState(returnState, entity);
+        this.return(returnState, startTime, result);
     }
 }
